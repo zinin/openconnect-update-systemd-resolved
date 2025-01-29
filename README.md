@@ -48,6 +48,20 @@ sudo openconnect --script=/path/to/openconnect-systemd-helper.sh https://vpn.exa
 ## Logging
 All actions and errors are logged to `/var/log/openconnect-systemd.log`. Ensure this file is writable by the script.
 
+## Verifying DNS Configuration
+After the script runs, you can verify the DNS settings by running `resolvectl` and checking the output. It should display something like this:
+
+```
+Link 45 (tun1)
+    Current Scopes: DNS
+         Protocols: +DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: 192.168.1.10
+       DNS Servers: 192.168.1.10 192.168.1.20
+        DNS Domain: lan.test.com
+```
+
+This indicates that the DNS servers and domain have been correctly configured for the VPN interface.
+
 ## Environment Variables
 The script relies on various environment variables set by OpenConnect:
 
