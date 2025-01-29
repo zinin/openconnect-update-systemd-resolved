@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+
+# Define constants
+DBUS_DEST="org.freedesktop.resolve1"
+DBUS_NODE="/org/freedesktop/resolve1"
+LOG_FILE="/var/log/openconnect-systemd.log"
+
+# Simple logging
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+# Log environment
+log_env() {
+    echo "----------------------------------------" >> "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Environment:" >> "$LOG_FILE"
+    env | sort >> "$LOG_FILE"
+    echo "----------------------------------------" >> "$LOG_FILE"
+}
+
+# DBus call
+busctl_call() {
+    busctl call "$DBUS_DEST" "$DBUS_NODE" "${DBUS_DEST}.Manager" "$@"
+    return $?
+}
+
+# Get interface index
+get_if_index() {
+    local dev="$1"
+    local link
+    link=$(ip link show dev "$dev")
+    echo "${link%%:*}"
+}
+
+# Configure split tunneling routes
+setup_split_routes() {
+    local tundev="$1"
+    local routes
+
+    # Handle split-include routes
+    routes=$(env | grep '^X-CSTP-Split-Include=')
+    while read -r route_line; do
+        local network
+        network=${route_line#X-CSTP-Split-Include=}
+        if [ -n "$network" ]; then
+            log "INFO: Adding split-include route: $network via $tundev"
+            ip route add "$network" dev "$tundev"
+        fi
+    done <<< "$routes"
+
+    # Handle split-exclude routes
+    routes=$(env | grep '^X-CSTP-Split-Exclude=')
+    while read -r route_line; do
+        local network
+        network=${route_line#X-CSTP-Split-Exclude=}
+        if [ -n "$network" ]; then
+            log "INFO: Adding split-exclude route: $network via main routing table"
+            # For exclude routes, we ensure they go through the main routing table
+            # instead of the VPN
+            if [ -n "$INTERNAL_IP4_ADDRESS" ]; then
+                ip route add "$network" via "$(ip route | grep '^default' | cut -d ' ' -f 3)"
+            fi
+        fi
+    done <<< "$routes"
+}
+
+# Configure IPv6 settings
+setup_ipv6() {
+    local tundev="$1"
+
+    if [ -n "$INTERNAL_IP6_ADDRESS" ] && [ -n "$INTERNAL_IP6_NETMASK" ]; then
+        log "INFO: Configuring IPv6 address: $INTERNAL_IP6_ADDRESS/$INTERNAL_IP6_NETMASK"
+        ip -6 addr add "$INTERNAL_IP6_ADDRESS/$INTERNAL_IP6_NETMASK" dev "$tundev"
+    fi
+
+    # Handle IPv6 routes
+    if [ -n "$INTERNAL_IP6_NETWORK" ] && [ -n "$INTERNAL_IP6_NETMASK" ]; then
+        log "INFO: Adding IPv6 route: $INTERNAL_IP6_NETWORK/$INTERNAL_IP6_NETMASK"
+        ip -6 route add "$INTERNAL_IP6_NETWORK/$INTERNAL_IP6_NETMASK" dev "$tundev"
+    fi
+}
+
+# Configure network interface
+setup_interface() {
+    local tundev="$1"
+    local internal_ip4_address="$INTERNAL_IP4_ADDRESS"
+    local internal_ip4_netmask="$INTERNAL_IP4_NETMASK"
+    local internal_ip4_mtu="$INTERNAL_IP4_MTU"
+
+    log "INFO: Configuring interface $tundev"
+
+    # Set interface up
+    ip link set dev "$tundev" up
+    if [ $? -ne 0 ]; then
+        log "ERROR: Failed to bring interface up"
+        return 1
+    fi
+
+    # Configure IP address if provided
+    if [ -n "$internal_ip4_address" ]; then
+        if [ -n "$internal_ip4_netmask" ]; then
+            log "INFO: Setting IP address: $internal_ip4_address/$internal_ip4_netmask"
+            ip addr add "$internal_ip4_address/$internal_ip4_netmask" dev "$tundev"
+        else
+            log "INFO: Setting IP address: $internal_ip4_address"
+            ip addr add "$internal_ip4_address" dev "$tundev"
+        fi
+    fi
+
+    # Set MTU if provided
+    if [ -n "$internal_ip4_mtu" ]; then
+        log "INFO: Setting MTU to $internal_ip4_mtu"
+        ip link set dev "$tundev" mtu "$internal_ip4_mtu"
+    fi
+
+    # Setup split tunneling routes
+    setup_split_routes "$tundev"
+
+    # Setup IPv6 if available
+    setup_ipv6 "$tundev"
+
+    # Handle banner if provided
+    if [ -n "$CISCO_BANNER" ]; then
+        log "INFO: VPN Banner: $CISCO_BANNER"
+    fi
+
+    return 0
+}
+
+# Handle connection
+handle_connect() {
+    local tundev="$TUNDEV"
+    if [ -z "$tundev" ]; then
+        log "ERROR: No TUNDEV specified"
+        return 1
+    fi
+
+    # Setup interface first
+    setup_interface "$tundev"
+    if [ $? -ne 0 ]; then
+        log "ERROR: Failed to setup interface"
+        return 1
+    fi
+
+    local if_index
+    if_index=$(get_if_index "$tundev")
+    if [ -z "$if_index" ]; then
+        log "ERROR: Failed to get interface index for $tundev"
+        return 1
+    fi
+
+    log "INFO: Processing connection for interface $tundev (index: $if_index)"
+
+    # Process DNS servers
+    local dns_servers=""
+    local dns_server_count=0
+    local dns_list
+    dns_list=$(env | grep '^X-CSTP-DNS=')
+
+    while read -r dns_line; do
+        local dns_server
+        dns_server=${dns_line#X-CSTP-DNS=}
+        if [ -n "$dns_server" ]; then
+            log "INFO: Adding DNS server: $dns_server"
+            IFS='.' read -r o1 o2 o3 o4 <<< "$dns_server"
+            dns_servers="$dns_servers 2 4 $o1 $o2 $o3 $o4"
+            dns_server_count=$((dns_server_count + 1))
+        fi
+    done <<< "$dns_list"
+
+    if [ $dns_server_count -gt 0 ]; then
+        log "INFO: Setting DNS servers"
+        # shellcheck disable=SC2086
+        busctl_call SetLinkDNS 'ia(iay)' "$if_index" "$dns_server_count" $dns_servers
+    fi
+
+    # Process default domain
+    local domain
+    domain=$(env | grep '^X-CSTP-Default-Domain=' | cut -d= -f2)
+    if [ -n "$domain" ]; then
+        log "INFO: Setting DNS domain: $domain"
+        busctl_call SetLinkDomains 'ia(sb)' "$if_index" 1 "$domain" false
+    fi
+
+    # Handle proxy settings
+    if [ -n "$CISCO_PROXY_PAC" ]; then
+        log "INFO: Proxy PAC URL: $CISCO_PROXY_PAC"
+        # Add proxy configuration handling here if needed
+    fi
+
+    log "INFO: Flushing DNS caches"
+    busctl_call FlushCaches
+
+    return 0
+}
+
+# Handle disconnection
+handle_disconnect() {
+    local tundev="$TUNDEV"
+    if [ -z "$tundev" ]; then
+        log "ERROR: No TUNDEV specified"
+        return 1
+    fi
+
+    local if_index
+    if_index=$(get_if_index "$tundev")
+    if [ -z "$if_index" ]; then
+        log "ERROR: Failed to get interface index for $tundev"
+        return 1
+    fi
+
+    log "INFO: Processing disconnection for interface $tundev (index: $if_index)"
+
+    # Remove all routes for this interface
+    log "INFO: Removing routes for $tundev"
+    ip route flush dev "$tundev"
+
+    # Remove IPv6 configuration if present
+    if [ -n "$INTERNAL_IP6_ADDRESS" ]; then
+        log "INFO: Removing IPv6 configuration"
+        ip -6 addr flush dev "$tundev"
+        ip -6 route flush dev "$tundev"
+    fi
+
+    # Bring interface down and flush addresses
+    log "INFO: Bringing interface down and flushing addresses"
+    ip addr flush dev "$tundev"
+    ip link set dev "$tundev" down
+
+    # Revert DNS settings
+    log "INFO: Reverting DNS settings"
+    busctl_call RevertLink i "$if_index"
+
+    return $?
+}
+
+# Ensure log file exists
+touch "$LOG_FILE" 2>/dev/null || exit 1
+
+# Log all environment variables
+log_env
+
+# Main script logic
+if [ -z "${reason:-}" ]; then
+    log "ERROR: No reason specified"
+    exit 1
+fi
+
+case "$reason" in
+    pre-init)
+        log "INFO: Skipping pre-init phase"
+        exit 0
+        ;;
+    connect)
+        log "INFO: Processing connection"
+        handle_connect
+        exit $?
+        ;;
+    disconnect)
+        log "INFO: Processing disconnection"
+        handle_disconnect
+        exit $?
+        ;;
+    *)
+        log "ERROR: Unknown reason: $reason"
+        exit 1
+        ;;
+esac
