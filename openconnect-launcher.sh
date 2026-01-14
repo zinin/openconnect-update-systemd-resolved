@@ -6,14 +6,14 @@
 set -euo pipefail
 
 # Constants
-CONFIG_FILE="/usr/local/etc/openconnect.conf"
-LOG_FILE="/var/log/openconnect-launcher.log"
+readonly CONFIG_FILE="/usr/local/etc/openconnect.conf"
+readonly LOG_FILE="/var/log/openconnect-launcher.log"
 
 # Exit codes
-EXIT_OK=0
-EXIT_CONFIG_ERROR=1
-EXIT_WAITING_2FA=2
-EXIT_CONNECTION_ERROR=3
+readonly EXIT_OK=0
+readonly EXIT_CONFIG_ERROR=1
+readonly EXIT_WAITING_2FA=2
+readonly EXIT_CONNECTION_ERROR=3
 
 # Logging
 log() {
@@ -95,10 +95,11 @@ is_lock_stale() {
     return 0  # Lock is stale
 }
 
-# Acquire lock
+# Acquire lock (uses flock for atomicity if available)
 acquire_lock() {
     local lock_file="$1"
 
+    # Check for stale lock first
     if ! is_lock_stale "$lock_file" "$LOCK_TIMEOUT"; then
         local pid
         pid=$(cat "$lock_file" 2>/dev/null || echo "unknown")
@@ -106,10 +107,19 @@ acquire_lock() {
         return 1
     fi
 
-    # Remove stale lock if exists
-    rm -f "$lock_file"
+    # Try to use flock for atomic lock acquisition
+    if command -v flock >/dev/null 2>&1; then
+        exec 200>"$lock_file"
+        if ! flock -n 200; then
+            log_info "Another instance acquired lock, waiting for 2FA"
+            return 1
+        fi
+    else
+        # Fallback: remove stale lock if exists
+        rm -f "$lock_file"
+    fi
 
-    # Create new lock with our PID
+    # Write our PID to lock file
     echo $$ > "$lock_file"
     log_info "Lock acquired (PID: $$)"
     return 0
@@ -124,7 +134,8 @@ release_lock() {
     fi
 }
 
-# Cleanup on exit
+# Cleanup on exit (called via trap)
+# shellcheck disable=SC2317
 cleanup() {
     release_lock "$LOCK_FILE"
 }
@@ -184,26 +195,23 @@ kill_openconnect() {
 
 # Start openconnect
 start_openconnect() {
-    local cmd="openconnect"
-    cmd="$cmd -i $VPN_INTERFACE"
-    cmd="$cmd --script=$VPN_SCRIPT"
-    cmd="$cmd -u $VPN_USER"
+    local -a cmd=(openconnect -i "$VPN_INTERFACE" "--script=$VPN_SCRIPT" -u "$VPN_USER")
 
     if [ -n "$VPN_AUTHGROUP" ]; then
-        cmd="$cmd --authgroup=\"$VPN_AUTHGROUP\""
+        cmd+=("--authgroup=$VPN_AUTHGROUP")
     fi
 
     if [ "$DAEMON_MODE" = "true" ]; then
-        cmd="$cmd --background"
+        cmd+=(--background)
     fi
 
-    cmd="$cmd $VPN_SERVER"
+    cmd+=("$VPN_SERVER")
 
-    log_info "Starting openconnect: $cmd"
+    log_info "Starting openconnect to $VPN_SERVER"
 
     # Run openconnect with password on stdin
     if [ "$DAEMON_MODE" = "true" ]; then
-        echo "$VPN_PASSWORD" | eval "$cmd"
+        echo "$VPN_PASSWORD" | "${cmd[@]}"
         local result=$?
 
         if [ $result -eq 0 ]; then
@@ -225,7 +233,7 @@ start_openconnect() {
         fi
     else
         # Interactive mode
-        echo "$VPN_PASSWORD" | eval "$cmd"
+        echo "$VPN_PASSWORD" | "${cmd[@]}"
         return $?
     fi
 }
@@ -254,9 +262,8 @@ main() {
     fi
 
     # Check current VPN status
-    local vpn_status
-    check_vpn_status
-    vpn_status=$?
+    local vpn_status=0
+    check_vpn_status || vpn_status=$?
 
     case $vpn_status in
         0)
