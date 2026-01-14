@@ -15,6 +15,9 @@ readonly EXIT_CONFIG_ERROR=1
 readonly EXIT_WAITING_2FA=2
 readonly EXIT_CONNECTION_ERROR=3
 
+# Lock state
+LOCK_ACQUIRED=false
+
 # Logging
 log() {
     local level="$1"
