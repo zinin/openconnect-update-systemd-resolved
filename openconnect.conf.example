@@ -1,0 +1,33 @@
+# OpenConnect VPN Configuration
+# Copy to /usr/local/etc/openconnect.conf and edit
+# Permissions: chmod 600 /usr/local/etc/openconnect.conf
+
+# === Credentials (required) ===
+VPN_USER="username"
+VPN_PASSWORD='your-password-here'  # use single quotes for special chars
+VPN_SERVER="vpn.example.com"
+VPN_AUTHGROUP=""  # optional, e.g. "VPN-2FA"
+
+# === Interface settings ===
+VPN_INTERFACE="tun0"
+VPN_SCRIPT="/usr/local/bin/openconnect-update-systemd-resolved"
+
+# === Connection verification (optional) ===
+# URL to check if VPN is working (leave empty to skip check)
+VPN_TEST_URL=""  # e.g. "https://internal.example.com/"
+MAX_ATTEMPTS=3
+RETRY_DELAY=3
+
+# === Lock file settings ===
+LOCK_FILE="/var/run/openconnect-launcher.lock"
+LOCK_TIMEOUT=300  # seconds, how long to wait for 2FA
+
+# === Run mode ===
+# true: run openconnect in background (for cron)
+# false: run interactively (for manual start)
+DAEMON_MODE=false
+
+# === Extra DNS domains (optional) ===
+# Space-separated list of additional domains to resolve through VPN DNS
+# Example: "example.com corp.example.com internal.example.com"
+EXTRA_DNS_DOMAINS=""
