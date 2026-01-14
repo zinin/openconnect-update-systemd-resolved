@@ -124,6 +124,7 @@ acquire_lock() {
 
     # Write our PID to lock file
     echo $$ > "$lock_file"
+    LOCK_ACQUIRED=true
     log_info "Lock acquired (PID: $$)"
     return 0
 }
