@@ -229,3 +229,63 @@ start_openconnect() {
         return $?
     fi
 }
+
+# Main function
+main() {
+    # Ensure log file exists
+    touch "$LOG_FILE" 2>/dev/null || {
+        echo "Cannot write to log file: $LOG_FILE" >&2
+        exit $EXIT_CONFIG_ERROR
+    }
+
+    log_info "=== OpenConnect Launcher started ==="
+
+    # Load config
+    if ! load_config; then
+        exit $EXIT_CONFIG_ERROR
+    fi
+
+    # Set up cleanup trap
+    trap cleanup EXIT
+
+    # Check lock
+    if ! acquire_lock "$LOCK_FILE"; then
+        exit $EXIT_WAITING_2FA
+    fi
+
+    # Check current VPN status
+    local vpn_status
+    check_vpn_status
+    vpn_status=$?
+
+    case $vpn_status in
+        0)
+            # VPN working fine
+            release_lock "$LOCK_FILE"
+            exit $EXIT_OK
+            ;;
+        2)
+            # Need reconnect
+            kill_openconnect
+            ;;
+        *)
+            # No VPN, check for orphan process
+            kill_openconnect
+            ;;
+    esac
+
+    # Start VPN
+    if start_openconnect; then
+        log_info "VPN connection established"
+        if [ "$DAEMON_MODE" = "true" ]; then
+            release_lock "$LOCK_FILE"
+        fi
+        exit $EXIT_OK
+    else
+        log_error "Failed to establish VPN connection"
+        exit $EXIT_CONNECTION_ERROR
+    fi
+}
+
+# Run main
+main "$@"
