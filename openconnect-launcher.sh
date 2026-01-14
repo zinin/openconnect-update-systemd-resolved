@@ -127,7 +127,7 @@ acquire_lock() {
     if ! is_lock_stale "$lock_file" "$LOCK_TIMEOUT"; then
         local pid
         pid=$(cat "$lock_file" 2>/dev/null || echo "unknown")
-        log_info "Another instance running (PID: $pid), waiting for 2FA"
+        log_info "Another instance running (PID: $pid)"
         return 1
     fi
 
@@ -135,7 +135,7 @@ acquire_lock() {
     if command -v flock >/dev/null 2>&1; then
         exec 200>"$lock_file"
         if ! flock -n 200; then
-            log_info "Another instance acquired lock, waiting for 2FA"
+            log_info "Another instance acquired lock"
             return 1
         fi
     else
