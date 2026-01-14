@@ -24,12 +24,11 @@ This project is based on the work of [jonathanio/update-systemd-resolved](https:
    git clone https://github.com/zinin/openconnect-update-systemd-resolved.git
    cd openconnect-update-systemd-resolved
    ```
-2. Save the script as `openconnect-systemd-helper.sh` (or any name you prefer).
-3. Ensure the script is executable:
+2. Ensure the script is executable:
    ```bash
-   chmod +x openconnect-systemd-helper.sh
+   chmod +x openconnect-update-systemd-resolved
    ```
-4. Place the script in a location accessible to OpenConnect, e.g., `/usr/local/bin/`.
+3. Place the script in a location accessible to OpenConnect, e.g., `/usr/local/bin/`.
 
 ## Usage
 This script is triggered by OpenConnect based on the `reason` variable provided in its environment. OpenConnect passes the following phases to the script:
@@ -42,8 +41,31 @@ This script is triggered by OpenConnect based on the `reason` variable provided 
 To use this script with OpenConnect, specify it as a `script`:
 
 ```bash
-sudo openconnect --script=/path/to/openconnect-systemd-helper.sh https://vpn.example.com
+sudo openconnect --script=/path/to/openconnect-update-systemd-resolved https://vpn.example.com
 ```
+
+### Extra DNS Domains
+
+If your VPN provides a subdomain (e.g., `subdomain.example.com`) but you need to resolve all `*.example.com` hosts through VPN DNS, create a config file at `/usr/local/etc/openconnect-extra-domains.conf`:
+
+```bash
+sudo mkdir -p /usr/local/etc
+sudo tee /usr/local/etc/openconnect-extra-domains.conf << EOF
+# Additional domains to resolve through VPN DNS
+example.com
+EOF
+```
+
+Multiple domains can be specified (one per line):
+
+```
+# Extra DNS domains for VPN
+example.com
+corp.example.com
+dev.example.com
+```
+
+Lines starting with `#` are treated as comments.
 
 ## Logging
 All actions and errors are logged to `/var/log/openconnect-systemd.log`. Ensure this file is writable by the script.
@@ -69,10 +91,12 @@ The script relies on various environment variables set by OpenConnect:
 - `INTERNAL_IP4_ADDRESS`, `INTERNAL_IP4_NETMASK`: IPv4 configuration for the VPN interface.
 - `INTERNAL_IP4_MTU`: MTU setting for the VPN interface.
 - `INTERNAL_IP6_ADDRESS`, `INTERNAL_IP6_NETMASK`: IPv6 configuration for the VPN interface.
-- `X-CSTP-Split-Include`: Comma-separated list of networks to route through the VPN.
-- `X-CSTP-Split-Exclude`: Comma-separated list of networks to bypass the VPN.
-- `X-CSTP-DNS`: DNS servers to use with the VPN.
+- `X-CSTP-Split-Include`: Networks to route through the VPN (multiple variables, one per network).
+- `X-CSTP-Split-Exclude`: Networks to bypass the VPN (multiple variables, one per network).
+- `X-CSTP-DNS`: DNS servers to use with the VPN (multiple variables, one per server).
 - `X-CSTP-Default-Domain`: Default DNS search domain for the VPN.
+
+Additionally, extra domains can be configured via `/usr/local/etc/openconnect-extra-domains.conf` (see "Extra DNS Domains" section above).
 
 ## Limitations
 - The script assumes the presence of `systemd-resolved` and may not work on systems without it.

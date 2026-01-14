@@ -4,6 +4,7 @@
 DBUS_DEST="org.freedesktop.resolve1"
 DBUS_NODE="/org/freedesktop/resolve1"
 LOG_FILE="/var/log/openconnect-systemd.log"
+EXTRA_DOMAINS_FILE="/usr/local/etc/openconnect-extra-domains.conf"
 
 # Simple logging
 log() {
@@ -174,12 +175,37 @@ handle_connect() {
         busctl_call SetLinkDNS 'ia(iay)' "$if_index" "$dns_server_count" $dns_servers
     fi
 
-    # Process default domain
+    # Process domains (default from VPN + extra from environment)
     local domain
     domain=$(env | grep '^X-CSTP-Default-Domain=' | cut -d= -f2)
+
+    local all_domains=""
+    local domain_count=0
+
+    # Add default domain from VPN
     if [ -n "$domain" ]; then
-        log "INFO: Setting DNS domain: $domain"
-        busctl_call SetLinkDomains 'ia(sb)' "$if_index" 1 "$domain" false
+        all_domains="\"$domain\" false"
+        domain_count=1
+        log "INFO: Adding VPN domain: $domain"
+    fi
+
+    # Add extra domains from config file
+    if [ -f "$EXTRA_DOMAINS_FILE" ]; then
+        while IFS= read -r extra_domain || [ -n "$extra_domain" ]; do
+            # Skip empty lines and comments
+            extra_domain=$(echo "$extra_domain" | sed 's/#.*//' | tr -d '[:space:]')
+            if [ -n "$extra_domain" ]; then
+                all_domains="$all_domains \"$extra_domain\" false"
+                domain_count=$((domain_count + 1))
+                log "INFO: Adding extra domain: $extra_domain"
+            fi
+        done < "$EXTRA_DOMAINS_FILE"
+    fi
+
+    # Set all domains via D-Bus
+    if [ $domain_count -gt 0 ]; then
+        log "INFO: Setting $domain_count DNS domain(s)"
+        eval busctl_call SetLinkDomains 'ia\(sb\)' "$if_index" "$domain_count" $all_domains
     fi
 
     # Handle proxy settings
