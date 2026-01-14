@@ -4,7 +4,7 @@
 DBUS_DEST="org.freedesktop.resolve1"
 DBUS_NODE="/org/freedesktop/resolve1"
 LOG_FILE="/var/log/openconnect-systemd.log"
-EXTRA_DOMAINS_FILE="/usr/local/etc/openconnect-extra-domains.conf"
+CONFIG_FILE="/usr/local/etc/openconnect.conf"
 
 # Simple logging
 log() {
@@ -190,16 +190,18 @@ handle_connect() {
     fi
 
     # Add extra domains from config file
-    if [ -f "$EXTRA_DOMAINS_FILE" ]; then
-        while IFS= read -r extra_domain || [ -n "$extra_domain" ]; do
-            # Skip empty lines and comments
-            extra_domain=$(echo "$extra_domain" | sed 's/#.*//' | tr -d '[:space:]')
-            if [ -n "$extra_domain" ]; then
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck source=/dev/null
+        source "$CONFIG_FILE"
+        if [ -n "$EXTRA_DNS_DOMAINS" ]; then
+            for extra_domain in $EXTRA_DNS_DOMAINS; do
                 all_domains="$all_domains \"$extra_domain\" false"
                 domain_count=$((domain_count + 1))
                 log "INFO: Adding extra domain: $extra_domain"
-            fi
-        done < "$EXTRA_DOMAINS_FILE"
+            done
+        fi
+    else
+        log "WARNING: Config file $CONFIG_FILE not found, no extra domains added"
     fi
 
     # Set all domains via D-Bus

@@ -44,28 +44,57 @@ To use this script with OpenConnect, specify it as a `script`:
 sudo openconnect --script=/path/to/openconnect-update-systemd-resolved https://vpn.example.com
 ```
 
-### Extra DNS Domains
+### Configuration
 
-If your VPN provides a subdomain (e.g., `subdomain.example.com`) but you need to resolve all `*.example.com` hosts through VPN DNS, create a config file at `/usr/local/etc/openconnect-extra-domains.conf`:
+All settings are stored in `/usr/local/etc/openconnect.conf`. Create it from the example:
 
 ```bash
-sudo mkdir -p /usr/local/etc
-sudo tee /usr/local/etc/openconnect-extra-domains.conf << EOF
-# Additional domains to resolve through VPN DNS
-example.com
-EOF
+sudo cp openconnect.conf.example /usr/local/etc/openconnect.conf
+sudo chmod 600 /usr/local/etc/openconnect.conf
 ```
 
-Multiple domains can be specified (one per line):
+The config file uses shell variable syntax. See `openconnect.conf.example` for all available options.
 
-```
-# Extra DNS domains for VPN
-example.com
-corp.example.com
-dev.example.com
+**Extra DNS Domains:** If your VPN provides a subdomain (e.g., `subdomain.example.com`) but you need to resolve all `*.example.com` hosts through VPN DNS, add them to `EXTRA_DNS_DOMAINS` in the config:
+
+```bash
+EXTRA_DNS_DOMAINS="example.com corp.example.com"
 ```
 
-Lines starting with `#` are treated as comments.
+### VPN Launcher Script
+
+For automated VPN management with 2FA support, use the `openconnect-launcher.sh` script:
+
+1. Copy and configure:
+   ```bash
+   sudo cp openconnect.conf.example /usr/local/etc/openconnect.conf
+   sudo chmod 600 /usr/local/etc/openconnect.conf
+   sudo nano /usr/local/etc/openconnect.conf  # fill in your credentials
+   ```
+
+2. Install the launcher:
+   ```bash
+   sudo cp openconnect-launcher.sh /usr/local/bin/
+   sudo chmod +x /usr/local/bin/openconnect-launcher.sh
+   ```
+
+3. Run manually:
+   ```bash
+   sudo /usr/local/bin/openconnect-launcher.sh
+   ```
+
+4. Or set up cron for automatic reconnection:
+   ```bash
+   echo "* * * * * root /usr/local/bin/openconnect-launcher.sh" | sudo tee /etc/cron.d/openconnect-vpn
+   ```
+
+The launcher handles:
+- Checking if VPN is already connected
+- Preventing duplicate connections during 2FA authentication
+- Automatic reconnection if VPN drops
+- Lock file with configurable timeout for 2FA wait
+
+Set `DAEMON_MODE=true` in config for cron usage.
 
 ## Logging
 All actions and errors are logged to `/var/log/openconnect-systemd.log`. Ensure this file is writable by the script.
@@ -96,7 +125,7 @@ The script relies on various environment variables set by OpenConnect:
 - `X-CSTP-DNS`: DNS servers to use with the VPN (multiple variables, one per server).
 - `X-CSTP-Default-Domain`: Default DNS search domain for the VPN.
 
-Additionally, extra domains can be configured via `/usr/local/etc/openconnect-extra-domains.conf` (see "Extra DNS Domains" section above).
+Additionally, extra domains can be configured via `EXTRA_DNS_DOMAINS` in `/usr/local/etc/openconnect.conf` (see "Configuration" section above).
 
 ## Limitations
 - The script assumes the presence of `systemd-resolved` and may not work on systems without it.
