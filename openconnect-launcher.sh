@@ -181,3 +181,51 @@ kill_openconnect() {
         sleep 2
     fi
 }
+
+# Start openconnect
+start_openconnect() {
+    local cmd="openconnect"
+    cmd="$cmd -i $VPN_INTERFACE"
+    cmd="$cmd --script=$VPN_SCRIPT"
+    cmd="$cmd -u $VPN_USER"
+
+    if [ -n "$VPN_AUTHGROUP" ]; then
+        cmd="$cmd --authgroup=\"$VPN_AUTHGROUP\""
+    fi
+
+    if [ "$DAEMON_MODE" = "true" ]; then
+        cmd="$cmd --background"
+    fi
+
+    cmd="$cmd $VPN_SERVER"
+
+    log_info "Starting openconnect: $cmd"
+
+    # Run openconnect with password on stdin
+    if [ "$DAEMON_MODE" = "true" ]; then
+        echo "$VPN_PASSWORD" | eval "$cmd"
+        local result=$?
+
+        if [ $result -eq 0 ]; then
+            # Wait for interface to get IP
+            local wait_count=0
+            while [ $wait_count -lt 30 ]; do
+                if interface_has_ip "$VPN_INTERFACE"; then
+                    log_info "VPN connected successfully"
+                    return 0
+                fi
+                sleep 1
+                wait_count=$((wait_count + 1))
+            done
+            log_error "Timeout waiting for VPN interface"
+            return 1
+        else
+            log_error "openconnect failed with exit code: $result"
+            return 1
+        fi
+    else
+        # Interactive mode
+        echo "$VPN_PASSWORD" | eval "$cmd"
+        return $?
+    fi
+}
