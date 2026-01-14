@@ -141,7 +141,9 @@ release_lock() {
 # Cleanup on exit (called via trap)
 # shellcheck disable=SC2317
 cleanup() {
-    release_lock "$LOCK_FILE"
+    if [ "$LOCK_ACQUIRED" = "true" ]; then
+        release_lock "$LOCK_FILE"
+    fi
 }
 
 # Check if interface has IP
