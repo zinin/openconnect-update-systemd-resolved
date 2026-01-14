@@ -85,7 +85,7 @@ For automated VPN management with 2FA support, use the `openconnect-launcher.sh`
 
 4. Or set up cron for automatic reconnection:
    ```bash
-   echo "* * * * * root /usr/local/bin/openconnect-launcher.sh" | sudo tee /etc/cron.d/openconnect-vpn
+   echo '* * * * * root /usr/local/bin/openconnect-launcher.sh >/dev/null 2>&1' | sudo tee /etc/cron.d/openconnect-vpn
    ```
 
 The launcher handles:
