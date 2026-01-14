@@ -79,23 +79,44 @@ is_lock_stale() {
     local timeout="$2"
 
     if [ ! -f "$lock_file" ]; then
-        return 0  # No lock = stale (can proceed)
+        return 0  # No lock = can proceed
     fi
 
-    # Check if PID in lock is still alive
+    # Check if openconnect with target interface is running
+    local openconnect_running=false
+    if pgrep -f "openconnect.*$VPN_INTERFACE" >/dev/null 2>&1; then
+        openconnect_running=true
+    fi
+
     local pid
     pid=$(cat "$lock_file" 2>/dev/null || echo "")
+
+    # If launcher PID is alive
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        # Process alive, check timeout
         local lock_age
         lock_age=$(( $(date +%s) - $(stat -c %Y "$lock_file") ))
+
         if [ "$lock_age" -lt "$timeout" ]; then
-            return 1  # Lock is fresh and process alive
+            return 1  # Lock is fresh, process alive - don't touch
         fi
-        log_warn "Lock file older than ${timeout}s, considering stale"
+
+        # Timeout exceeded, but if openconnect is running - don't touch
+        if [ "$openconnect_running" = "true" ]; then
+            log_warn "Lock timeout exceeded but openconnect is running, not considering stale"
+            return 1
+        fi
+
+        log_warn "Lock file older than ${timeout}s and openconnect not running, considering stale"
+        return 0
     fi
 
-    return 0  # Lock is stale
+    # Launcher PID is dead - check openconnect
+    if [ "$openconnect_running" = "true" ]; then
+        log_warn "Launcher PID dead but openconnect still running, not considering stale"
+        return 1
+    fi
+
+    return 0  # PID dead and openconnect not running - lock is stale
 }
 
 # Acquire lock (uses flock for atomicity if available)
