@@ -128,3 +128,56 @@ release_lock() {
 cleanup() {
     release_lock "$LOCK_FILE"
 }
+
+# Check if interface has IP
+interface_has_ip() {
+    local iface="$1"
+    ip addr show "$iface" 2>/dev/null | grep -q "inet "
+}
+
+# Check if internal resource is accessible
+check_internal_resource() {
+    local url="$1"
+    local max_attempts="$2"
+    local retry_delay="$3"
+
+    if [ -z "$url" ]; then
+        return 0  # No URL configured, assume OK
+    fi
+
+    local attempt=1
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if curl -s -k -m 10 -o /dev/null -w "%{http_code}" "$url" | grep -q -E "^(200|302)$"; then
+            return 0
+        fi
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            sleep "$retry_delay"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
+# Check VPN status
+check_vpn_status() {
+    if interface_has_ip "$VPN_INTERFACE"; then
+        if check_internal_resource "$VPN_TEST_URL" "$MAX_ATTEMPTS" "$RETRY_DELAY"; then
+            log_info "VPN is connected and working"
+            return 0  # VPN OK
+        else
+            log_warn "VPN interface has IP but internal resources not accessible"
+            return 2  # Need reconnect
+        fi
+    fi
+    return 1  # No VPN
+}
+
+# Kill existing openconnect process
+kill_openconnect() {
+    if pgrep -f "openconnect.*$VPN_INTERFACE" >/dev/null; then
+        log_info "Terminating existing openconnect process"
+        pkill -f "openconnect.*$VPN_INTERFACE" || true
+        sleep 2
+    fi
+}
