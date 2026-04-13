@@ -7,6 +7,16 @@ VPN_USER="username"
 VPN_PASSWORD='your-password-here'  # use single quotes for special chars
 VPN_SERVER="vpn.example.com"
 VPN_AUTHGROUP=""  # optional, e.g. "VPN-2FA"
+VPN_USERAGENT="AnyConnect"  # User-Agent header, empty to disable
+VPN_PROTOCOL=""  # e.g. "anyconnect", "nc", "gp"
+VPN_VERSION_STRING=""  # e.g. "4.10.05111"
+VPN_OS=""  # e.g. "win", "mac", "linux"
+OPENCONNECT_BIN="openconnect"  # path to openconnect binary
+
+# === TOTP 2FA (optional) ===
+# Base32 secret from otpauth:// URI (the "secret=..." part)
+# Requires: apt install oath-toolkit
+VPN_TOTP_SECRET=""
 
 # === Interface settings ===
 VPN_INTERFACE="tun0"

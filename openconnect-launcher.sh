@@ -68,6 +68,12 @@ load_config() {
     LOCK_FILE="${LOCK_FILE:-/var/run/openconnect-launcher.lock}"
     LOCK_TIMEOUT="${LOCK_TIMEOUT:-300}"
     DAEMON_MODE="${DAEMON_MODE:-false}"
+    VPN_USERAGENT="${VPN_USERAGENT:-AnyConnect}"
+    VPN_PROTOCOL="${VPN_PROTOCOL:-}"
+    VPN_VERSION_STRING="${VPN_VERSION_STRING:-}"
+    VPN_OS="${VPN_OS:-}"
+    OPENCONNECT_BIN="${OPENCONNECT_BIN:-openconnect}"
+    VPN_TOTP_SECRET="${VPN_TOTP_SECRET:-}"
 
     log_info "Config loaded successfully"
     return 0
@@ -220,12 +226,50 @@ kill_openconnect() {
     fi
 }
 
+# Generate TOTP code
+generate_totp() {
+    local secret="$1"
+    if ! command -v oathtool >/dev/null 2>&1; then
+        log_error "oathtool not found. Install: apt install oath-toolkit"
+        return 1
+    fi
+    oathtool --totp --base32 "$secret"
+}
+
+# Build stdin input for openconnect (password + optional TOTP)
+build_stdin_input() {
+    local input="$VPN_PASSWORD"
+    if [ -n "$VPN_TOTP_SECRET" ]; then
+        local totp_code
+        totp_code=$(generate_totp "$VPN_TOTP_SECRET") || return 1
+        log_info "TOTP code generated"
+        input="${input}\n${totp_code}"
+    fi
+    echo "$input"
+}
+
 # Start openconnect
 start_openconnect() {
-    local -a cmd=(openconnect -i "$VPN_INTERFACE" "--script=$VPN_SCRIPT" -u "$VPN_USER")
+    local -a cmd=("$OPENCONNECT_BIN" -i "$VPN_INTERFACE" "--script=$VPN_SCRIPT" -u "$VPN_USER")
 
     if [ -n "$VPN_AUTHGROUP" ]; then
         cmd+=("--authgroup=$VPN_AUTHGROUP")
+    fi
+
+    if [ -n "$VPN_USERAGENT" ]; then
+        cmd+=("--useragent=$VPN_USERAGENT")
+    fi
+
+    if [ -n "$VPN_PROTOCOL" ]; then
+        cmd+=("--protocol=$VPN_PROTOCOL")
+    fi
+
+    if [ -n "$VPN_VERSION_STRING" ]; then
+        cmd+=("--version-string=$VPN_VERSION_STRING")
+    fi
+
+    if [ -n "$VPN_OS" ]; then
+        cmd+=("--os=$VPN_OS")
     fi
 
     if [ "$DAEMON_MODE" = "true" ]; then
@@ -236,9 +280,13 @@ start_openconnect() {
 
     log_info "Starting openconnect to $VPN_SERVER"
 
-    # Run openconnect with password on stdin
+    # Build stdin input (password + optional TOTP)
+    local stdin_input
+    stdin_input=$(build_stdin_input) || return 1
+
+    # Run openconnect with credentials on stdin
     if [ "$DAEMON_MODE" = "true" ]; then
-        echo "$VPN_PASSWORD" | "${cmd[@]}"
+        printf '%b\n' "$stdin_input" | "${cmd[@]}"
         local result=$?
 
         if [ $result -eq 0 ]; then
@@ -260,7 +308,7 @@ start_openconnect() {
         fi
     else
         # Interactive mode
-        echo "$VPN_PASSWORD" | "${cmd[@]}"
+        printf '%b\n' "$stdin_input" | "${cmd[@]}"
         return $?
     fi
 }
