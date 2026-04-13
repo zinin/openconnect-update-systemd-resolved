@@ -17,6 +17,7 @@ This project is based on the work of [jonathanio/update-systemd-resolved](https:
 - A Linux distribution with `systemd` and `busctl` available.
 - OpenConnect installed and configured.
 - Sufficient permissions to manage network settings (requires root or elevated privileges).
+- (Optional) `oath-toolkit` for automatic TOTP 2FA code generation (`apt install oath-toolkit`).
 
 ## Installation
 1. Clone this repository or copy the script to your system:
@@ -93,6 +94,8 @@ The launcher handles:
 - Preventing duplicate connections during 2FA authentication
 - Automatic reconnection if VPN drops
 - Lock file with configurable timeout for 2FA wait
+- Automatic TOTP 2FA code generation (requires `oath-toolkit`)
+- Configurable openconnect binary path, protocol, user-agent, and OS emulation
 
 Set `DAEMON_MODE=true` in config for cron usage.
 
