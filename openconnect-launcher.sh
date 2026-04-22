@@ -284,30 +284,48 @@ start_openconnect() {
     local stdin_input
     stdin_input=$(build_stdin_input) || return 1
 
+    local stdin_file
+    stdin_file=$(mktemp) || {
+        log_error "Failed to create temporary credentials file"
+        return 1
+    }
+    chmod 600 "$stdin_file"
+    printf '%b\n' "$stdin_input" > "$stdin_file"
+
     # Run openconnect with credentials on stdin
     if [ "$DAEMON_MODE" = "true" ]; then
-        printf '%b\n' "$stdin_input" | "${cmd[@]}"
-        local result=$?
+        "${cmd[@]}" < "$stdin_file" &
+        local openconnect_pid=$!
+        rm -f "$stdin_file"
 
-        if [ $result -eq 0 ]; then
-            # Wait for interface to get IP
-            local wait_count=0
-            while [ $wait_count -lt 30 ]; do
-                if interface_has_ip "$VPN_INTERFACE"; then
-                    log_info "VPN connected successfully"
-                    return 0
+        # Wait for interface to get IP while monitoring startup failure.
+        local wait_count=0
+        while [ $wait_count -lt 30 ]; do
+            if interface_has_ip "$VPN_INTERFACE"; then
+                log_info "VPN connected successfully"
+                return 0
+            fi
+
+            if [ -n "$openconnect_pid" ] && ! kill -0 "$openconnect_pid" 2>/dev/null; then
+                local result=0
+                if wait "$openconnect_pid"; then
+                    openconnect_pid=""
+                else
+                    result=$?
+                    log_error "openconnect failed with exit code: $result"
+                    return 1
                 fi
-                sleep 1
-                wait_count=$((wait_count + 1))
-            done
-            log_error "Timeout waiting for VPN interface"
-            return 1
-        else
-            log_error "openconnect failed with exit code: $result"
-            return 1
-        fi
+            fi
+
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+
+        log_error "Timeout waiting for VPN interface"
+        return 1
     else
         # Interactive mode
+        rm -f "$stdin_file"
         printf '%b\n' "$stdin_input" | "${cmd[@]}"
         return $?
     fi
